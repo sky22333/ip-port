@@ -1,1 +1,61 @@
-# test
+name: 发布二进制文件
+
+on:
+  workflow_dispatch:  # 手动触发
+    inputs:
+      version:
+        description: '版本号 (例如: v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Go 环境
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24'
+
+      - name: 编译 Linux 和 Windows 可执行文件
+        run: |
+          mkdir -p build
+          
+          # Linux amd64（静态编译）
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o build/main-linux-amd64 .
+
+          # Windows amd64（静态编译）
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o build/main-windows-amd64.exe .
+
+      - name: 生成 SHA256 校验和
+        run: |
+          cd build
+          sha256sum main-* > checksums.txt
+          cat checksums.txt
+
+      - name: 发布到 GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.event.inputs.version }}
+          name: "HubProxy ${{ github.event.inputs.version }}"
+          body: |
+            ## 下载文件
+
+            - [main-linux-amd64](./main-linux-amd64)
+            - [main-windows-amd64.exe](./main-windows-amd64.exe)
+
+            ## 校验和
+            \`\`\`
+            $(cat build/checksums.txt)
+            \`\`\`
+          files: |
+            build/main-*
+            build/checksums.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
