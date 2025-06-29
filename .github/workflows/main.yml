@@ -43,17 +43,13 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           tag_name: ${{ github.event.inputs.version }}
-          name: "HubProxy ${{ github.event.inputs.version }}"
+          name: "${{ github.event.inputs.version }}"
           body: |
             ## 下载文件
 
             - [main-linux-amd64](./main-linux-amd64)
             - [main-windows-amd64.exe](./main-windows-amd64.exe)
 
-            ## 校验和
-            \`\`\`
-            $(cat build/checksums.txt)
-            \`\`\`
           files: |
             build/main-*
             build/checksums.txt
