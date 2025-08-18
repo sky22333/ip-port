@@ -148,14 +148,14 @@ func worker(jobs <-chan ScanTask, results chan<- ScanResult, timeout time.Durati
 // 计算推荐并发数
 func calculateWorkerCount() int {
 	cpuCount := runtime.NumCPU()
-	// 基于CPU核心数计算，网络IO密集型任务可以适当增加
-	workerCount := cpuCount * 50
+	// 激进策略
+	workerCount := cpuCount * 250
 	
 	// 设置合理的范围
-	if workerCount < 50 {
-		workerCount = 50
-	} else if workerCount > 1000 {
-		workerCount = 1000
+	if workerCount < 100 {
+		workerCount = 100
+	} else if workerCount > 5000 {
+		workerCount = 5000
 	}
 	
 	return workerCount
@@ -201,7 +201,7 @@ func progressMonitor(totalTasks int, scannedCount *int64, foundCount *int64, sta
 // 解析端口参数
 func parsePorts(portStr string) ([]int, error) {
 	if portStr == "" {
-		return []int{10808}, nil // 默认端口
+		return []int{80}, nil // 默认端口
 	}
 	
 	portParts := strings.Split(portStr, ",")
@@ -213,20 +213,56 @@ func parsePorts(portStr string) ([]int, error) {
 			continue
 		}
 		
-		port, err := strconv.Atoi(part)
-		if err != nil {
-			return nil, fmt.Errorf("无效的端口号: %s", part)
+		// 检查是否为端口范围（如：8000-9000）
+		if strings.Contains(part, "-") {
+			rangeParts := strings.Split(part, "-")
+			if len(rangeParts) != 2 {
+				return nil, fmt.Errorf("无效的端口范围格式: %s，正确格式如: 8000-9000", part)
+			}
+			
+			startPort, err := strconv.Atoi(strings.TrimSpace(rangeParts[0]))
+			if err != nil {
+				return nil, fmt.Errorf("无效的起始端口号: %s", rangeParts[0])
+			}
+			
+			endPort, err := strconv.Atoi(strings.TrimSpace(rangeParts[1]))
+			if err != nil {
+				return nil, fmt.Errorf("无效的结束端口号: %s", rangeParts[1])
+			}
+			
+			if startPort < 1 || startPort > 65535 {
+				return nil, fmt.Errorf("起始端口号超出范围(1-65535): %d", startPort)
+			}
+			
+			if endPort < 1 || endPort > 65535 {
+				return nil, fmt.Errorf("结束端口号超出范围(1-65535): %d", endPort)
+			}
+			
+			if startPort > endPort {
+				return nil, fmt.Errorf("起始端口号不能大于结束端口号: %d > %d", startPort, endPort)
+			}
+			
+			// 添加范围内的所有端口
+			for port := startPort; port <= endPort; port++ {
+				ports = append(ports, port)
+			}
+		} else {
+			// 单个端口
+			port, err := strconv.Atoi(part)
+			if err != nil {
+				return nil, fmt.Errorf("无效的端口号: %s", part)
+			}
+			
+			if port < 1 || port > 65535 {
+				return nil, fmt.Errorf("端口号超出范围(1-65535): %d", port)
+			}
+			
+			ports = append(ports, port)
 		}
-		
-		if port < 1 || port > 65535 {
-			return nil, fmt.Errorf("端口号超出范围(1-65535): %d", port)
-		}
-		
-		ports = append(ports, port)
 	}
 	
 	if len(ports) == 0 {
-		return []int{10808}, nil // 默认端口
+		return []int{80}, nil // 默认端口
 	}
 	
 	return ports, nil
@@ -235,11 +271,18 @@ func parsePorts(portStr string) ([]int, error) {
 func main() {
 	// 命令行参数解析
 	var portStr string
-	flag.StringVar(&portStr, "p", "10808", "要扫描的端口，多个端口用逗号分隔，例如: -p 22,80,443,10808")
+	var concurrency int
+	var timeoutSeconds int
+	flag.StringVar(&portStr, "p", "80", "要扫描的端口，支持单个端口、多个端口和端口范围，例如: -p 22,80,443,10808 或 -p 80-90,443,8000-8010")
+
+	flag.IntVar(&concurrency, "c", 0, "自定义并发数，0表示使用自动计算值，建议范围: 1000-5000")
+	flag.IntVar(&timeoutSeconds, "t", 1, "连接超时时间(秒)，默认1秒")
 	flag.Parse()
 
+	// 设置超时时间
+	timeout := time.Duration(timeoutSeconds) * time.Second
+
 	const (
-		timeout = 3 * time.Second    // 连接超时时间
 		inputFile = "ip.txt"         // 输入文件
 		outputFile = "open.txt"       // 输出文件
 	)
@@ -257,7 +300,18 @@ func main() {
 	cpuCount := runtime.NumCPU()
 	workerCount := calculateWorkerCount()
 	
-	fmt.Printf("系统信息: CPU核心数=%d, 推荐并发数=%d\n", cpuCount, workerCount)
+	// 如果用户指定了并发数，则使用用户指定的值
+	if concurrency > 0 {
+		if concurrency < 10 {
+			fmt.Printf("警告: 并发数过低(%d)，建议至少100\n", concurrency)
+		} else if concurrency > 10000 {
+			fmt.Printf("警告: 并发数过高(%d)，可能导致系统资源耗尽\n", concurrency)
+		}
+		workerCount = concurrency
+		fmt.Printf("系统信息: CPU核心数=%d, 用户指定并发数=%d\n", cpuCount, workerCount)
+	} else {
+		fmt.Printf("系统信息: CPU核心数=%d, 自动计算并发数=%d (激进策略)\n", cpuCount, workerCount)
+	}
 	fmt.Printf("扫描端口: %v\n", ports)
 
 	// 读取IP段文件
@@ -379,6 +433,6 @@ func main() {
 	fmt.Printf("端口开放: %d 个\n", finalFound)
 	fmt.Printf("实际用时: %v\n", actualTime.Round(time.Second))
 	fmt.Printf("扫描速度: %.0f 任务/秒\n", float64(totalTasks)/actualTime.Seconds())
-	fmt.Printf("成功率: %.2f%%\n", float64(finalFound)/float64(totalTasks)*100)
+	fmt.Printf("端口开放率: %.2f%%\n", float64(finalFound)/float64(totalTasks)*100)
 	fmt.Printf("结果已保存到: %s\n", outputFile)
 }
