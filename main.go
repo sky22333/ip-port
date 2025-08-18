@@ -148,8 +148,8 @@ func worker(jobs <-chan ScanTask, results chan<- ScanResult, timeout time.Durati
 // 计算推荐并发数
 func calculateWorkerCount() int {
 	cpuCount := runtime.NumCPU()
-	// 激进策略
-	workerCount := cpuCount * 250
+	// 并发算法
+	workerCount := cpuCount * 150
 	
 	// 设置合理的范围
 	if workerCount < 100 {
@@ -276,7 +276,7 @@ func main() {
 	flag.StringVar(&portStr, "p", "80", "要扫描的端口，支持单个端口、多个端口和端口范围，例如: -p 22,80,443,10808 或 -p 80-90,443,8000-8010")
 
 	flag.IntVar(&concurrency, "c", 0, "自定义并发数，0表示使用自动计算值，建议范围: 1000-5000")
-	flag.IntVar(&timeoutSeconds, "t", 1, "连接超时时间(秒)，默认1秒")
+	flag.IntVar(&timeoutSeconds, "t", 2, "连接超时时间(秒)，默认2秒")
 	flag.Parse()
 
 	// 设置超时时间
@@ -310,7 +310,7 @@ func main() {
 		workerCount = concurrency
 		fmt.Printf("系统信息: CPU核心数=%d, 用户指定并发数=%d\n", cpuCount, workerCount)
 	} else {
-		fmt.Printf("系统信息: CPU核心数=%d, 自动计算并发数=%d (激进策略)\n", cpuCount, workerCount)
+		fmt.Printf("系统信息: CPU核心数=%d, 自动计算并发数=%d\n", cpuCount, workerCount)
 	}
 	fmt.Printf("扫描端口: %v\n", ports)
 
@@ -436,3 +436,4 @@ func main() {
 	fmt.Printf("端口开放率: %.2f%%\n", float64(finalFound)/float64(totalTasks)*100)
 	fmt.Printf("结果已保存到: %s\n", outputFile)
 }
+
